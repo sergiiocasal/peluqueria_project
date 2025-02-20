@@ -1,6 +1,5 @@
-// Requerimos las dependencias necesarias
 const express = require("express");
-const sqlite3 = require("sqlite3").verbose();
+const mysql = require("mysql2");
 const bodyParser = require("body-parser");
 const cors = require("cors");
 
@@ -11,22 +10,40 @@ const PORT = process.env.PORT || 5000;
 app.use(cors());
 app.use(bodyParser.json()); // Para poder leer el cuerpo de las solicitudes en formato JSON
 
-// Conexión a la base de datos SQLite
-const db = new sqlite3.Database("./database.sqlite", (err) => {
+// Conexión a la base de datos MySQL usando las variables de entorno de Railway
+const connection = mysql.createConnection({
+  host: process.env.DB_HOST,
+  user: process.env.DB_USER,
+  password: process.env.DB_PASSWORD,
+  database: process.env.DB_NAME,
+});
+
+// Conexión a la base de datos
+connection.connect((err) => {
   if (err) {
     console.error("Error al conectar a la base de datos:", err.message);
   } else {
-    console.log("✅ Conectado a SQLite");
+    console.log("✅ Conectado a MySQL");
   }
 });
 
 // Crear la tabla "clientes" si no existe
-db.run(`CREATE TABLE IF NOT EXISTS clientes (
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
-  telefono TEXT UNIQUE NOT NULL,
-  visitas INTEGER DEFAULT 0,
-  totavisitas INTEGER DEFAULT 0
-)`);
+const createTableQuery = `
+  CREATE TABLE IF NOT EXISTS clientes (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    telefono VARCHAR(15) UNIQUE NOT NULL,
+    visitas INT DEFAULT 0,
+    totavisitas INT DEFAULT 0
+  );
+`;
+
+connection.query(createTableQuery, (err, results) => {
+  if (err) {
+    console.error("Error al crear la tabla:", err.message);
+  } else {
+    console.log("✅ Tabla 'clientes' verificada o creada.");
+  }
+});
 
 // Endpoint para registrar una visita
 app.post("/registrar-visita", (req, res) => {
@@ -38,13 +55,14 @@ app.post("/registrar-visita", (req, res) => {
   }
 
   // Buscar al cliente por teléfono en la base de datos
-  db.get("SELECT * FROM clientes WHERE telefono = ?", [telefono], (err, row) => {
+  connection.query("SELECT * FROM clientes WHERE telefono = ?", [telefono], (err, results) => {
     if (err) {
       return res.status(500).json({ mensaje: "Error en la base de datos" });
     }
 
-    if (row) {
+    if (results.length > 0) {
       // Si el cliente ya existe, actualizamos el contador de visitas
+      const row = results[0];
       let nuevasVisitas = row.visitas + 1;
       const totalVisitas = row.totavisitas + 1;
 
@@ -54,24 +72,32 @@ app.post("/registrar-visita", (req, res) => {
       }
 
       // Actualizamos la base de datos con las nuevas visitas
-      db.run("UPDATE clientes SET visitas = ?, totavisitas = ? WHERE telefono = ?", [nuevasVisitas, totalVisitas, telefono], (err) => {
-        if (err) {
-          return res.status(500).json({ mensaje: "Error al actualizar las visitas" });
+      connection.query(
+        "UPDATE clientes SET visitas = ?, totavisitas = ? WHERE telefono = ?",
+        [nuevasVisitas, totalVisitas, telefono],
+        (err) => {
+          if (err) {
+            return res.status(500).json({ mensaje: "Error al actualizar las visitas" });
+          }
+          res.json({
+            mensaje: nuevasVisitas === 0
+              ? `¡Felicidades! Has alcanzado 10 visitas, tu contador de visitas se ha reiniciado.`
+              : `Llevas ${nuevasVisitas} visitas este mes. Total de visitas acumuladas: ${totalVisitas}.`,
+          });
         }
-        res.json({
-          mensaje: nuevasVisitas === 0
-            ? `¡Felicidades! Has alcanzado 10 visitas, tu contador de visitas se ha reiniciado.`
-            : `Llevas ${nuevasVisitas} visitas este mes. Total de visitas acumuladas: ${totalVisitas}.`,
-        });
-      });
+      );
     } else {
       // Si el cliente no existe, creamos un nuevo cliente con 1 visita
-      db.run("INSERT INTO clientes (telefono, visitas, totavisitas) VALUES (?, ?, ?)", [telefono, 1, 1], (err) => {
-        if (err) {
-          return res.status(500).json({ mensaje: "Error al registrar el cliente" });
+      connection.query(
+        "INSERT INTO clientes (telefono, visitas, totavisitas) VALUES (?, ?, ?)",
+        [telefono, 1, 1],
+        (err) => {
+          if (err) {
+            return res.status(500).json({ mensaje: "Error al registrar el cliente" });
+          }
+          res.json({ mensaje: "Primera visita registrada." });
         }
-        res.json({ mensaje: "Primera visita registrada." });
-      });
+      );
     }
   });
 });
@@ -80,15 +106,16 @@ app.post("/registrar-visita", (req, res) => {
 app.get("/ver-visitas/:telefono", (req, res) => {
   const { telefono } = req.params;
 
-  db.get("SELECT visitas, totavisitas FROM clientes WHERE telefono = ?", [telefono], (err, row) => {
+  connection.query("SELECT visitas, totavisitas FROM clientes WHERE telefono = ?", [telefono], (err, results) => {
     if (err) {
       return res.status(500).json({ mensaje: "Error en la base de datos" });
     }
 
-    if (!row) {
+    if (results.length === 0) {
       return res.status(404).json({ mensaje: "Cliente no encontrado" });
     }
 
+    const row = results[0];
     res.json({
       mensaje: `Llevas ${row.visitas} visitas este mes. Total de visitas acumuladas: ${row.totavisitas}.`,
     });
