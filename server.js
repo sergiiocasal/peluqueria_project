@@ -1,21 +1,24 @@
+require('dotenv').config(); // Carga las variables de entorno desde el archivo .env
+
 const express = require("express");
 const mysql = require("mysql2");
 const bodyParser = require("body-parser");
 const cors = require("cors");
 
 const app = express();
-const PORT = 3306;
+const PORT = process.env.PORT || 5000; // Usamos el puerto de .env o 5000 por defecto
 
 // Middleware
 app.use(cors());
 app.use(bodyParser.json()); // Para poder leer el cuerpo de las solicitudes en formato JSON
 
-// Conexión a la base de datos MySQL
+// Conexión a la base de datos MySQL usando variables de entorno
 const db = mysql.createConnection({
-  host: "mysql://root:pYlVyBfzJHqTqWoPGfTmPMzWwHOiBYNQ@ballast.proxy.rlwy.net:59014/railway", // En local, generalmente es localhost
-  user: "root", // Usuario por defecto de MySQL en XAMPP
-  password: "pYlVyBfzJHqTqWoPGfTmPMzWwHOiBYNQ", // Contraseña por defecto está vacía en XAMPP
-  database: "railway", // El nombre de la base de datos que creaste en phpMyAdmin
+  host: process.env.MYSQL_HOST,
+  user: process.env.MYSQL_USER,
+  password: process.env.MYSQL_ROOT_PASSWORD,
+  database: process.env.MYSQL_DATABASE,
+  port: process.env.MYSQL_PORT, // Asegúrate de usar el puerto adecuado
 });
 
 db.connect((err) => {
@@ -45,7 +48,6 @@ db.query(createTableQuery, (err) => {
   }
 });
 
-// Endpoint para comprobar si el teléfono está registrado
 // Endpoint para comprobar si el teléfono está registrado
 app.get("/comprobar-visitas", (req, res) => {
   const { telefono } = req.query;
@@ -119,7 +121,6 @@ app.post("/registrar-visita", (req, res) => {
     }
   });
 });
-
 
 // Iniciar el servidor
 app.listen(PORT, () => {
