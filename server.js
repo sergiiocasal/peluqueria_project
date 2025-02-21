@@ -4,22 +4,21 @@ const bodyParser = require("body-parser");
 const cors = require("cors");
 
 const app = express();
-const PORT = process.env.PORT || 5000;
+const PORT = 3306;
 
 // Middleware
 app.use(cors());
 app.use(bodyParser.json()); // Para poder leer el cuerpo de las solicitudes en formato JSON
 
-// Conexión a la base de datos MySQL usando las variables de entorno de Railway
-const connection = mysql.createConnection({
-  host: process.env.DB_HOST,
-  user: process.env.DB_USER,
-  password: process.env.DB_PASSWORD,
-  database: process.env.DB_NAME,
+// Conexión a la base de datos MySQL
+const db = mysql.createConnection({
+  host: "mysql://root:pYlVyBfzJHqTqWoPGfTmPMzWwHOiBYNQ@ballast.proxy.rlwy.net:59014/railway", // En local, generalmente es localhost
+  user: "root", // Usuario por defecto de MySQL en XAMPP
+  password: "pYlVyBfzJHqTqWoPGfTmPMzWwHOiBYNQ", // Contraseña por defecto está vacía en XAMPP
+  database: "railway", // El nombre de la base de datos que creaste en phpMyAdmin
 });
 
-// Conexión a la base de datos
-connection.connect((err) => {
+db.connect((err) => {
   if (err) {
     console.error("Error al conectar a la base de datos:", err.message);
   } else {
@@ -33,38 +32,56 @@ const createTableQuery = `
     id INT AUTO_INCREMENT PRIMARY KEY,
     telefono VARCHAR(15) UNIQUE NOT NULL,
     visitas INT DEFAULT 0,
-    totavisitas INT DEFAULT 0
+    totavisitas INT DEFAULT 0,
+    nombre VARCHAR(255) DEFAULT NULL
   );
 `;
 
-connection.query(createTableQuery, (err, results) => {
+db.query(createTableQuery, (err) => {
   if (err) {
     console.error("Error al crear la tabla:", err.message);
   } else {
-    console.log("✅ Tabla 'clientes' verificada o creada.");
+    console.log("✅ Tabla 'clientes' verificada/creada");
   }
+});
+
+// Endpoint para comprobar si el teléfono está registrado
+// Endpoint para comprobar si el teléfono está registrado
+app.get("/comprobar-visitas", (req, res) => {
+  const { telefono } = req.query;
+
+  db.query("SELECT * FROM clientes WHERE telefono = ?", [telefono], (err, results) => {
+    if (err) {
+      return res.status(500).json({ mensaje: "Error en la base de datos" });
+    }
+
+    if (results.length === 0) {
+      return res.json({ telefonoRegistrado: false }); // No existe el teléfono
+    } else {
+      return res.json({ telefonoRegistrado: true, visitas: results[0].visitas }); // El teléfono ya existe
+    }
+  });
 });
 
 // Endpoint para registrar una visita
 app.post("/registrar-visita", (req, res) => {
-  const { telefono } = req.body;
+  const { telefono, nombre } = req.body;
 
-  // Validación de que el número de teléfono tenga 9 dígitos
-  if (!telefono || !telefono.match(/^\d{9}$/)) {
-    return res.status(400).json({ mensaje: "Número de teléfono inválido" });
-  }
-
-  // Buscar al cliente por teléfono en la base de datos
-  connection.query("SELECT * FROM clientes WHERE telefono = ?", [telefono], (err, results) => {
+  // Si el teléfono ya está registrado
+  db.query("SELECT * FROM clientes WHERE telefono = ?", [telefono], (err, results) => {
     if (err) {
       return res.status(500).json({ mensaje: "Error en la base de datos" });
     }
 
     if (results.length > 0) {
-      // Si el cliente ya existe, actualizamos el contador de visitas
-      const row = results[0];
-      let nuevasVisitas = row.visitas + 1;
-      const totalVisitas = row.totavisitas + 1;
+      // Si ya tiene visitas, no permitimos actualizar el nombre
+      if (results[0].visitas > 0 && nombre) {
+        return res.status(400).json({ mensaje: "El nombre no debe ser actualizado después de la primera visita." });
+      }
+
+      // Actualizar el contador de visitas
+      let nuevasVisitas = results[0].visitas + 1;
+      const totalVisitas = results[0].totavisitas + 1;
 
       // Si las visitas llegan a 10, se reinician a 0
       if (nuevasVisitas === 10) {
@@ -72,7 +89,7 @@ app.post("/registrar-visita", (req, res) => {
       }
 
       // Actualizamos la base de datos con las nuevas visitas
-      connection.query(
+      db.query(
         "UPDATE clientes SET visitas = ?, totavisitas = ? WHERE telefono = ?",
         [nuevasVisitas, totalVisitas, telefono],
         (err) => {
@@ -80,17 +97,18 @@ app.post("/registrar-visita", (req, res) => {
             return res.status(500).json({ mensaje: "Error al actualizar las visitas" });
           }
           res.json({
-            mensaje: nuevasVisitas === 0
-              ? `¡Felicidades! Has alcanzado 10 visitas, tu contador de visitas se ha reiniciado.`
-              : `Llevas ${nuevasVisitas} visitas este mes. Total de visitas acumuladas: ${totalVisitas}.`,
+            mensaje:
+              nuevasVisitas === 0
+                ? `¡Felicidades! Has alcanzado 10 visitas. Tu próxima visita, te invitamos nosotros.`
+                : `Llevas ${nuevasVisitas} visitas este mes. Total de visitas acumuladas: ${totalVisitas}.`,
           });
         }
       );
     } else {
-      // Si el cliente no existe, creamos un nuevo cliente con 1 visita
-      connection.query(
-        "INSERT INTO clientes (telefono, visitas, totavisitas) VALUES (?, ?, ?)",
-        [telefono, 1, 1],
+      // Si el cliente no existe, creamos un nuevo cliente con el nombre y la primera visita
+      db.query(
+        "INSERT INTO clientes (telefono, nombre, visitas, totavisitas) VALUES (?, ?, ?, ?)",
+        [telefono, nombre, 1, 1],
         (err) => {
           if (err) {
             return res.status(500).json({ mensaje: "Error al registrar el cliente" });
@@ -102,25 +120,6 @@ app.post("/registrar-visita", (req, res) => {
   });
 });
 
-// Endpoint para consultar las visitas de un cliente
-app.get("/ver-visitas/:telefono", (req, res) => {
-  const { telefono } = req.params;
-
-  connection.query("SELECT visitas, totavisitas FROM clientes WHERE telefono = ?", [telefono], (err, results) => {
-    if (err) {
-      return res.status(500).json({ mensaje: "Error en la base de datos" });
-    }
-
-    if (results.length === 0) {
-      return res.status(404).json({ mensaje: "Cliente no encontrado" });
-    }
-
-    const row = results[0];
-    res.json({
-      mensaje: `Llevas ${row.visitas} visitas este mes. Total de visitas acumuladas: ${row.totavisitas}.`,
-    });
-  });
-});
 
 // Iniciar el servidor
 app.listen(PORT, () => {
