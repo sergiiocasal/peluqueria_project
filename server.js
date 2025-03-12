@@ -5,6 +5,8 @@ const express = require('express');
 const sqlite3 = require('sqlite3').verbose();  // Importamos sqlite3
 const bodyParser = require('body-parser');
 const cors = require('cors');
+const cookieParser = require('cookie-parser'); 
+const helmet = require('helmet');  
 
 const app = express();
 const PORT = process.env.PORT || 3977;  // Usamos el puerto de .env o 5000 por defecto
