@@ -10,8 +10,32 @@ const app = express();
 const PORT = process.env.PORT || 3977;  // Usamos el puerto de .env o 5000 por defecto
 
 // Middleware
-app.use(cors());
-app.use(bodyParser.json());  // Para leer el cuerpo de las solicitudes como JSON
+app.use(express.json());
+app.use(cookieParser());
+app.use(helmet.referrerPolicy({ policy: 'unsafe-url' }));
+app.use(cors({
+  origin: (origin, callback) => {
+    const ACCEPTED_ORIGINS = [
+      // 
+      // AQUI VAN LOS DOMINIOS PERMITIDOS
+      // 
+    ];
+
+    if (ACCEPTED_ORIGINS.includes(origin)) {
+      return callback(null, true);
+    }
+
+    if (!origin) {
+      return callback(null, true);
+    }
+
+    return callback(new Error('Not allowed by CORS'));
+  },
+  methods: ['GET', 'POST', 'OPTIONS', 'DELETE', 'PATCH'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'Access-Control-Allow-Origin'],
+}));
+
+app.disable('x-powered-by');
 
 // Configuración de la conexión con la base de datos SQLite usando la URL de Turso
 const db = new sqlite3.Database("libsql://peluqueria-sergiiocasal.turso.io", (err) => {
